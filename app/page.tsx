@@ -1,9 +1,5 @@
-import Editor from "@/components/Editor";
+import EditorLoader from "@/components/EditorLoader";
 
 export default function Home() {
-  return (
-    <div>
-      <Editor />
-    </div>
-  );
+  return <EditorLoader />;
 }
