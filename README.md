@@ -4,13 +4,15 @@ A slide editor with an AI assistant. Build decks by hand (text, images, tables, 
 
 ## Getting started
 
+Requirements: Node.js 20.9 or newer (needed by Next.js 16) and a current desktop browser. The app was developed and tested in Chromium.
+
 ```bash
 npm install
 cp .env.example .env.local   # then set LLM_API_KEY
 npm run dev
 ```
 
-Open http://localhost:3000.
+Open http://localhost:3000. Use `localhost` rather than `127.0.0.1`. The dev server blocks its live-reload connection for `127.0.0.1`, and the browser keeps saved presentations separately for each address.
 
 ### AI configuration (`.env.local`)
 
@@ -77,7 +79,8 @@ When the provider rejects a request, the chat shows the provider's own error mes
 - **Groups:** clicking any member selects the whole group. Copies of a group stay grouped. PowerPoint export doesn't keep groups.
 - **Locked elements** show a lock badge.
   - You can't move, resize, nudge, cut or delete them, and the AI can't change them at all.
-  - You can still edit their text and formatting by hand.
+  - A locked image can't be cropped or replaced.
+  - You can still edit their text and formatting by hand, and a locked chart's or table's data.
   - A slide that contains a locked element can't be deleted by the AI.
 - **Double-click** a text box to edit it in place, a chart to edit its data, a table to edit its cells, or an image to crop it.
 - **Speaker notes:** a collapsible panel under the canvas holds the notes for the current slide.
@@ -88,7 +91,7 @@ When the provider rejects a request, the chat shows the provider's own error mes
   - Edit labels, series and values. Numbers like `1,200`, `$45` and `12%` are accepted.
   - **Paste data** takes cells copied from Excel, Numbers or Google Sheets, or CSV text. The first column becomes the labels and the other columns the series; a first row of names becomes the series names.
   - Cells that aren't numbers are highlighted, and saving waits until they're fixed.
-  - Scatter charts use the first column as X values, so those must be numbers too.
+  - Scatter charts use the first column as X values, so those must be numbers too. If none are, the slide shows a hint instead of points; this can happen after switching a chart with text labels to scatter.
 - **Table:**
   - Edit cells and add or remove rows and columns.
   - Pasting spreadsheet cells into any cell fills the table from there, growing it as needed.
@@ -107,6 +110,8 @@ When the provider rejects a request, the chat shows the provider's own error mes
   - **An image** becomes an image element.
 - Copied text, tables and charts also land on the system clipboard as plain text, so you can paste them into other apps. Tables and chart data paste as spreadsheet cells.
 - Typing in a field, or copying selected page text, keeps the browser's normal copy and paste.
+- Each shortcut press copies or pastes exactly once, including ⌘C / ⌘V on macOS.
+- The toolbar and slide-menu **Paste** items paste what you copied inside the app. To paste from other apps, use ⌘/Ctrl V.
 
 ### AI assistant
 
@@ -114,7 +119,7 @@ When the provider rejects a request, the chat shows the provider's own error mes
 - The assistant can create whole decks, add, delete and reorder slides, and change text, layout, colors, charts, tables and speaker notes. Each AI response is a single undo step.
 - While a request runs, the slide shows a dashed "AI is editing…" outline.
 - Afterwards, the elements and slide thumbnails the AI changed flash briefly. The reply lists what changed and anything that was skipped, for example a locked element.
-- Each presentation keeps its own chat history (the newest 200 messages), restored when you reopen it.
+- Each presentation keeps its own chat history (the newest 200 messages), restored when you reopen it. **Clear** empties it.
 
 ### Header
 
@@ -155,6 +160,7 @@ Pitch Deck, Project Update, Quarterly Review and Product Launch. All copy is pla
 
 - **Where:** every presentation and its chat history are stored in IndexedDB in your browser (database `ai-slide-builder`), with a small index of presentations for the dashboard. Changes are autosaved about 0.4 s after each edit, and immediately when the tab is hidden or you leave the editor.
 - **Older single-deck data:** a presentation saved by an earlier single-deck version is moved into the dashboard automatically.
+- **Undo history:** it belongs to the presentation that's open. It starts fresh when you open a presentation or reload the page.
 - **Unreadable data:** the app keeps a backup copy, recovers every slide and element it can, and tells you what was dropped.
 - **Several tabs:**
   - If the same presentation is open in two tabs, the other tab shows a banner offering to reload.
@@ -163,6 +169,22 @@ Pitch Deck, Project Update, Quarterly Review and Product Launch. All copy is pla
 - **Storage blocked or full:** if the browser blocks storage (some private modes) or storage is full, the app says so. The dashboard shows a banner, the header shows "Can't save in this browser" or "Not saved", and a message explains why.
 - **What is sent to the AI:** your messages and the deck's text, positions, colors, chart and table data, notes, lock and group markers. Images are never sent, only their alt text.
 - **Long conversations:** the most recent turns are sent word for word, within a token budget. Older turns are condensed into a short summary of what you asked and what changed, without extra AI calls. Very large decks are abbreviated, but the current slide is always sent in full. The chat shows a note when older messages are being summarized.
+
+## Troubleshooting
+
+- **"The AI provider rejected the API key"** (or another provider error):
+  - Check `LLM_API_KEY`, `LLM_BASE_URL` and `LLM_MODEL` in `.env.local`. A Groq key (`gsk_…`) only works with the Groq URL, and an xAI key (`xai-…`) only with the xAI URL.
+  - Make sure no `LLM_API_KEY` exported in your shell overrides `.env.local`.
+  - Restart `npm run dev` after any change.
+- **The AI says it can't reach the server or times out:** the dev server must be running, and your network must allow the provider's API. Requests time out after 90 seconds.
+- **"Can't save in this browser":** the browser is blocking storage, for example in a private window or with site data disabled. Use a normal window, or export your work before closing the tab.
+- **"Not saved":** browser storage is probably full. Delete presentations you no longer need, or use smaller images.
+- **"Presentation not found" or an empty dashboard:**
+  - Presentations live in the browser, so they're separate for each browser, profile and address. `localhost:3000` and `127.0.0.1:3000` count as different addresses.
+  - Clearing site data deletes them.
+- **"This presentation was changed in another tab":** choose **Reload** to load the latest version. If you keep editing instead, this tab's version overwrites the other.
+- **Nothing happens when you drag or delete an element:** it may be locked; look for the lock badge and use **Unlock**.
+- **A chart shows "No data to display":** a pie or doughnut needs at least one positive value; a scatter chart shows its own hint when its X values aren't numbers.
 
 ## Limits
 
@@ -218,4 +240,62 @@ lib/
   templates.ts, factory.ts, sanitize.ts, geometry.ts, chart.ts, image.ts …
 ```
 
-Tests live next to the code they cover (`*.test.ts(x)`).
+## Testing
+
+- **Tools:** Vitest with Testing Library, jsdom and fake-indexeddb.
+- **Where tests live:** next to the code they cover (`*.test.ts(x)`). Every component and module with logic has its own test file; small display-only wrappers are covered through the components that use them.
+- **No real AI calls:** tests never call the AI provider (`fetch` is mocked), and the PowerPoint export test builds a real `.pptx` in memory to check its contents.
+
+```bash
+npm test                                         # all tests once
+npx vitest run components/editor/Canvas.test.tsx # a single file
+npm run test:coverage                            # with a coverage report
+npm run check                                    # type check + lint + tests
+```
+
+## How copy and paste work (for developers)
+
+- **What a copy stores:**
+  - The full elements or slides go into an in-app clipboard (`lib/store/clipboardStore.ts`). It's mirrored to `localStorage`, which is how a copy reaches other tabs and presentations.
+  - The system clipboard gets plain text plus a token of type `application/x-ai-slide-builder`.
+- **How a paste is matched:** the token tells a paste whether it came from this app. If a browser drops the custom type, matching falls back to the plain text.
+- **Shortcut handling:** on ⌘/Ctrl C, X or V, `components/hooks/useClipboard.ts` briefly moves focus to a hidden text field that has a selection.
+  - This makes every browser fire exactly one clipboard event. On macOS that event arrives a moment later, through the browser's Edit menu.
+  - The event is handled once, and focus goes back to where it was.
+
+## Changelog
+
+### 2.0 (October 2026)
+
+- **Presentations:** a dashboard with new, rename, duplicate and delete. Each presentation has its own URL and its own saved AI chat, and older single-deck data moves in automatically.
+- **Copy and paste:** cut, copy and paste for elements and slides, across slides, presentations and tabs. Pasting from other apps turns spreadsheet cells into a table, text into a text box and images into images.
+- **Slides:** insert a new slide above or below any slide.
+- **Selection:** multi-select with a selection box, group / ungroup, lock / unlock, and arrow-key nudging of whole selections (1 px, or 10 px with Shift).
+- **Tables:** a new table element with its own editor.
+- **Charts:** doughnut and scatter types; stacked bars, dual axis and data labels; pasting chart data from a spreadsheet or CSV.
+- **Images:** crop (keeps scale and position, like PowerPoint) and replace.
+- **Speaker notes:** an editor under the canvas; notes show below the slide when presenting (N toggles them).
+- **AI assistant:**
+  - It edits tables and notes and leaves locked elements alone.
+  - It shows an "AI is editing…" outline while it works and highlights what it changed.
+  - Long conversations are condensed automatically.
+- **Export:**
+  - New: a web page (`.html`) export.
+  - PowerPoint export adds tables, speaker notes, the new chart options and cropped images.
+- **Fixes:**
+  - ⌘C / ⌘V on macOS pasted twice.
+  - Single-series bar charts exported to PowerPoint with a different color per bar.
+  - Pie and doughnut charts were keyboard tab stops.
+  - A save made while leaving the editor could be reported as failed, and save errors repeated their warning.
+  - Gateway error pages (e.g. 504) were reported as a bad AI response.
+  - Very small crops could extend past the image.
+  - A recovered presentation could be listed under the wrong id.
+
+### 1.0
+
+A single-presentation editor:
+- slide sidebar, toolbar and canvas, with undo / redo and autosave
+- AI chat assistant
+- templates
+- present mode
+- PDF and PowerPoint export
