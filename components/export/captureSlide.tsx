@@ -21,9 +21,8 @@ async function waitForPaint(host: HTMLElement) {
   await nextFrame();
 }
 
-/** Renders a slide off-screen at full size and returns it as a JPEG data URL (for PDF export). */
-export async function captureSlideImage(slide: Slide): Promise<string> {
-  const { toJpeg } = await import("html-to-image");
+/** Renders a slide off-screen at full size, runs `read` on the rendered node, then cleans up. */
+async function withRenderedSlide<T>(slide: Slide, read: (node: HTMLElement) => Promise<T>): Promise<T> {
   const host = document.createElement("div");
   host.setAttribute("aria-hidden", "true");
   Object.assign(host.style, {
@@ -41,15 +40,33 @@ export async function captureSlideImage(slide: Slide): Promise<string> {
     await waitForPaint(host);
     const node = host.firstElementChild as HTMLElement | null;
     if (!node) throw new Error("Slide could not be rendered.");
-    return await toJpeg(node, {
+    return await read(node);
+  } finally {
+    root.unmount();
+    host.remove();
+  }
+}
+
+/** A slide as a JPEG data URL (for PDF export). */
+export async function captureSlideImage(slide: Slide): Promise<string> {
+  const { toJpeg } = await import("html-to-image");
+  return withRenderedSlide(slide, (node) =>
+    toJpeg(node, {
       width: SLIDE_WIDTH,
       height: SLIDE_HEIGHT,
       pixelRatio: CAPTURE_PIXEL_RATIO,
       quality: 0.92,
       backgroundColor: slide.background,
-    });
-  } finally {
-    root.unmount();
-    host.remove();
-  }
+    }),
+  );
+}
+
+/** A slide as static HTML markup (for the web page export). Editor-only attributes are removed. */
+export async function captureSlideMarkup(slide: Slide): Promise<string> {
+  return withRenderedSlide(slide, async (node) => {
+    const copy = node.cloneNode(true) as HTMLElement;
+    copy.removeAttribute("data-slide-id");
+    copy.querySelectorAll("[data-slide-id]").forEach((el) => el.removeAttribute("data-slide-id"));
+    return copy.outerHTML;
+  });
 }

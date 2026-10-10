@@ -1,6 +1,7 @@
 import { createDeck, createSlide } from "@/lib/factory";
 import type { Deck, Slide, SlideElement } from "@/lib/schema";
 import { useChatStore } from "@/lib/store/chatStore";
+import { clearClipboardForTests } from "@/lib/store/clipboardStore";
 import { getInitialEditorState, useEditorStore } from "@/lib/store/editorStore";
 import { useToastStore } from "@/lib/store/toastStore";
 
@@ -8,6 +9,7 @@ export function resetStores() {
   useEditorStore.setState(getInitialEditorState());
   useChatStore.setState({ messages: [], pending: false });
   useToastStore.setState({ toasts: [] });
+  clearClipboardForTests();
 }
 
 /** Loads a deck into the editor store (as if read from storage) and returns it. */

@@ -1,7 +1,8 @@
 import { memo } from "react";
-import type { SlideElement, TextElement } from "@/lib/schema";
+import type { ImageCrop, SlideElement, TextElement } from "@/lib/schema";
 import ChartView from "./ChartView";
 import ShapeView from "./ShapeView";
+import TableView from "./TableView";
 
 export const TEXT_LINE_HEIGHT = 1.2;
 
@@ -41,19 +42,51 @@ function ElementView({ element, background, interactive = false }: ElementViewPr
       );
     case "shape":
       return <ShapeView element={element} />;
-    case "image":
+    case "image": {
+      const crop = element.crop;
+      if (!crop) {
+        return (
+          // eslint-disable-next-line @next/next/no-img-element -- data URLs from the user's device; next/image adds nothing here.
+          <img
+            src={element.src}
+            alt={element.alt}
+            draggable={false}
+            style={{ display: "block", width: "100%", height: "100%", objectFit: "fill", userSelect: "none" }}
+          />
+        );
+      }
+      // The visible box shows only the cropped region, scaled to fill the element.
       return (
-        // eslint-disable-next-line @next/next/no-img-element -- data URLs from the user's device; next/image adds nothing here.
-        <img
-          src={element.src}
-          alt={element.alt}
-          draggable={false}
-          style={{ display: "block", width: "100%", height: "100%", objectFit: "fill", userSelect: "none" }}
-        />
+        <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden" }} data-cropped="true">
+          {/* eslint-disable-next-line @next/next/no-img-element -- see above */}
+          <img
+            src={element.src}
+            alt={element.alt}
+            draggable={false}
+            style={cropImageStyle(crop)}
+          />
+        </div>
       );
+    }
     case "chart":
       return <ChartView element={element} background={background} interactive={interactive} />;
+    case "table":
+      return <TableView element={element} />;
   }
+}
+
+/** Positions the full image so that only the crop rectangle fills the container. */
+export function cropImageStyle(crop: ImageCrop): React.CSSProperties {
+  return {
+    position: "absolute",
+    display: "block",
+    maxWidth: "none",
+    width: `${100 / crop.width}%`,
+    height: `${100 / crop.height}%`,
+    left: `${(-crop.x / crop.width) * 100}%`,
+    top: `${(-crop.y / crop.height) * 100}%`,
+    userSelect: "none",
+  };
 }
 
 export default memo(ElementView);

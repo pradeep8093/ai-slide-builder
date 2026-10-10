@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, NotebookText, X } from "lucide-react";
 import { SLIDE_HEIGHT, SLIDE_WIDTH } from "@/lib/constants";
 import type { Slide } from "@/lib/schema";
 import { useElementSize } from "../hooks/useElementSize";
@@ -20,8 +20,11 @@ export const CONTROLS_HIDE_MS = 2500;
 export default function PresentMode({ slides, startIndex, onExit }: PresentModeProps) {
   const [index, setIndex] = useState(() => Math.min(Math.max(startIndex, 0), Math.max(slides.length - 1, 0)));
   const [controlsVisible, setControlsVisible] = useState(true);
+  // Speaker notes show below the slide; N toggles them.
+  const [notesVisible, setNotesVisible] = useState(true);
   const rootRef = useRef<HTMLDivElement>(null);
-  const size = useElementSize(rootRef);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const size = useElementSize(stageRef);
   const indexRef = useRef(index);
   const onExitRef = useRef(onExit);
   useEffect(() => {
@@ -91,6 +94,12 @@ export default function PresentMode({ slides, startIndex, onExit }: PresentModeP
           event.preventDefault();
           exit();
           break;
+        case "n":
+        case "N":
+          if (event.metaKey || event.ctrlKey || event.altKey) break;
+          event.preventDefault();
+          setNotesVisible((v) => !v);
+          break;
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -114,23 +123,37 @@ export default function PresentMode({ slides, startIndex, onExit }: PresentModeP
       role="dialog"
       aria-modal="true"
       aria-label="Presentation"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black"
+      className="fixed inset-0 z-50 flex flex-col bg-black"
       style={{ cursor: controlsVisible ? "default" : "none" }}
       onMouseMove={() => setControlsVisible(true)}
       onClick={next}
     >
-      {atEnd || !slide ? (
-        <p className="text-sm text-neutral-400">End of presentation. Click or press → to exit.</p>
-      ) : (
-        <div style={{ width: SLIDE_WIDTH * scale, height: SLIDE_HEIGHT * scale }} aria-label={`Slide ${index + 1} of ${total}`} role="group">
-          <div style={{ transform: `scale(${scale})`, transformOrigin: "top left", width: SLIDE_WIDTH, height: SLIDE_HEIGHT }}>
-            <SlideRenderer slide={slide} interactive />
+      <div ref={stageRef} className="flex min-h-0 flex-1 items-center justify-center">
+        {atEnd || !slide ? (
+          <p className="text-sm text-neutral-400">End of presentation. Click or press → to exit.</p>
+        ) : (
+          <div style={{ width: SLIDE_WIDTH * scale, height: SLIDE_HEIGHT * scale }} aria-label={`Slide ${index + 1} of ${total}`} role="group">
+            <div style={{ transform: `scale(${scale})`, transformOrigin: "top left", width: SLIDE_WIDTH, height: SLIDE_HEIGHT }}>
+              <SlideRenderer slide={slide} interactive />
+            </div>
           </div>
-        </div>
+        )}
+      </div>
+
+      {notesVisible && slide && !atEnd && (
+        <section
+          aria-label="Speaker notes"
+          data-testid="present-notes"
+          className="max-h-[24vh] shrink-0 overflow-y-auto border-t border-white/10 bg-neutral-950 px-8 py-4 text-lg leading-relaxed text-neutral-200"
+          style={{ cursor: "auto" }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {slide.notes.trim() ? <p className="mx-auto max-w-5xl whitespace-pre-wrap">{slide.notes}</p> : <p className="mx-auto max-w-5xl text-neutral-500">No notes for this slide.</p>}
+        </section>
       )}
 
       <div
-        className={`absolute bottom-4 right-4 flex items-center gap-1 rounded-lg bg-neutral-900/80 p-1 text-white transition-opacity ${controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"}`}
+        className={`absolute right-4 top-4 flex items-center gap-1 rounded-lg bg-neutral-900/80 p-1 text-white transition-opacity ${controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"}`}
         onClick={(event) => event.stopPropagation()}
       >
         <button type="button" onClick={previous} disabled={index === 0} aria-label="Previous slide" className="rounded p-1.5 hover:bg-white/10 disabled:opacity-30">
@@ -141,6 +164,16 @@ export default function PresentMode({ slides, startIndex, onExit }: PresentModeP
         </span>
         <button type="button" onClick={next} aria-label="Next slide" className="rounded p-1.5 hover:bg-white/10">
           <ChevronRight size={18} aria-hidden />
+        </button>
+        <button
+          type="button"
+          onClick={() => setNotesVisible((v) => !v)}
+          aria-label={notesVisible ? "Hide speaker notes" : "Show speaker notes"}
+          aria-pressed={notesVisible}
+          title="Speaker notes (N)"
+          className="ml-1 rounded p-1.5 hover:bg-white/10 aria-pressed:bg-white/15"
+        >
+          <NotebookText size={18} aria-hidden />
         </button>
         <button type="button" onClick={exit} aria-label="Exit presentation" className="ml-1 rounded p-1.5 hover:bg-white/10">
           <X size={18} aria-hidden />

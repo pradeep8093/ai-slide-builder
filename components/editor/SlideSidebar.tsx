@@ -4,9 +4,12 @@ import { useEffect } from "react";
 import { closestCenter, DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ArrowDown, ArrowUp, Copy, MoreHorizontal, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ClipboardPaste, Copy, CopyPlus, MoreHorizontal, Plus, Trash2 } from "lucide-react";
 import type { Slide } from "@/lib/schema";
+import { readClipboard } from "@/lib/store/clipboardStore";
 import { useEditorStore } from "@/lib/store/editorStore";
+import { toast } from "@/lib/store/toastStore";
+import { copySlides, pasteEntry, writeSystemText } from "../hooks/useClipboard";
 import ScaledSlide from "../slide/ScaledSlide";
 import MenuButton from "../ui/MenuButton";
 
@@ -30,11 +33,24 @@ interface ThumbnailProps {
   index: number;
   count: number;
   selected: boolean;
+  /** Token of the AI change that touched this slide (replays the highlight), if any. */
+  highlightToken: string | null;
 }
 
-function SlideThumbnail({ slide, index, count, selected }: ThumbnailProps) {
+/** Slide menu "Paste": copied slides go after this slide; copied elements go onto it. */
+export function pasteAtSlide(slideId: string, index: number) {
+  const entry = readClipboard();
+  if (!entry) {
+    toast.info("Nothing to paste yet. Copy elements or slides first.");
+    return;
+  }
+  if (entry.payload.kind === "elements") useEditorStore.getState().selectSlide(slideId);
+  pasteEntry(entry, index + 1);
+}
+
+function SlideThumbnail({ slide, index, count, selected, highlightToken }: ThumbnailProps) {
   const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: slide.id });
-  const { selectSlide, duplicateSlide, deleteSlide, moveSlide } = useEditorStore.getState();
+  const { selectSlide, duplicateSlide, deleteSlide, moveSlide, addSlide } = useEditorStore.getState();
   const number = index + 1;
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
@@ -77,12 +93,27 @@ function SlideThumbnail({ slide, index, count, selected }: ThumbnailProps) {
         >
           <ScaledSlide slide={slide} width={THUMBNAIL_WIDTH} />
         </button>
+        {highlightToken && (
+          <div key={highlightToken} data-testid="slide-ai-highlight" className="ai-flash pointer-events-none absolute inset-0 rounded-md ring-2 ring-indigo-500" aria-hidden />
+        )}
         <div className="absolute right-1 top-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
           <MenuButton
             label={`Slide ${number} actions`}
             className="flex h-6 w-6 items-center justify-center rounded bg-white/95 text-neutral-600 shadow-sm ring-1 ring-black/5 hover:text-neutral-900"
             items={[
-              { id: "duplicate", label: "Duplicate", icon: <Copy size={14} />, onSelect: () => duplicateSlide(slide.id) },
+              { id: "add-above", label: "New slide above", icon: <Plus size={14} />, onSelect: () => addSlide(index) },
+              { id: "add-below", label: "New slide below", icon: <Plus size={14} />, onSelect: () => addSlide(index + 1) },
+              { id: "duplicate", label: "Duplicate", icon: <CopyPlus size={14} />, onSelect: () => duplicateSlide(slide.id) },
+              {
+                id: "copy",
+                label: "Copy",
+                icon: <Copy size={14} />,
+                onSelect: () => {
+                  const entry = copySlides([slide.id]);
+                  if (entry) writeSystemText(entry.plainText);
+                },
+              },
+              { id: "paste", label: "Paste", icon: <ClipboardPaste size={14} />, onSelect: () => pasteAtSlide(slide.id, index) },
               { id: "up", label: "Move up", icon: <ArrowUp size={14} />, disabled: index === 0, onSelect: () => moveSlide(slide.id, index - 1) },
               { id: "down", label: "Move down", icon: <ArrowDown size={14} />, disabled: index === count - 1, onSelect: () => moveSlide(slide.id, index + 1) },
               { id: "delete", label: "Delete", icon: <Trash2 size={14} />, danger: true, onSelect: () => deleteSlide(slide.id) },
@@ -110,6 +141,7 @@ export function applyDragEnd(
 export default function SlideSidebar() {
   const slides = useEditorStore((s) => s.deck.slides);
   const selectedSlideId = useEditorStore((s) => s.selectedSlideId);
+  const aiHighlight = useEditorStore((s) => s.aiHighlight);
   const { addSlide, moveSlide } = useEditorStore.getState();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -135,7 +167,14 @@ export default function SlideSidebar() {
             <SortableContext items={slides.map((s) => s.id)} strategy={verticalListSortingStrategy}>
               <ol className="space-y-3 pt-1">
                 {slides.map((slide, index) => (
-                  <SlideThumbnail key={slide.id} slide={slide} index={index} count={slides.length} selected={slide.id === selectedSlideId} />
+                  <SlideThumbnail
+                    key={slide.id}
+                    slide={slide}
+                    index={index}
+                    count={slides.length}
+                    selected={slide.id === selectedSlideId}
+                    highlightToken={aiHighlight?.slideIds.includes(slide.id) ? aiHighlight.token : null}
+                  />
                 ))}
               </ol>
             </SortableContext>

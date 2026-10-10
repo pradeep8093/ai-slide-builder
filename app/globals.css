@@ -9,3 +9,47 @@ body {
 body {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
+
+/* A brief flash on whatever the AI just changed. */
+@keyframes ai-flash {
+  0% {
+    opacity: 0;
+    background-color: rgba(99, 102, 241, 0.22);
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    background-color: rgba(99, 102, 241, 0);
+  }
+}
+.ai-flash {
+  animation: ai-flash 2.4s ease-out both;
+}
+
+/* Dashed outline that breathes while the AI is working on the slide. */
+@keyframes ai-pending {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.ai-pending,
+.ai-pending-label {
+  animation: ai-pending 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-flash {
+    animation: none;
+    opacity: 1;
+  }
+  .ai-pending,
+  .ai-pending-label {
+    animation: none;
+  }
+}

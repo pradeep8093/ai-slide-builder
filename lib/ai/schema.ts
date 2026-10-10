@@ -47,9 +47,20 @@ export const aiChartSpecSchema = z.strictObject({
   categories: z.array(z.string()),
   series: z.array(chartSeries),
   showLegend: z.boolean().nullable(),
+  stacked: z.boolean().nullable(),
+  showValues: z.boolean().nullable(),
+  dualAxis: z.boolean().nullable(),
 });
 
-export const aiElementSpecSchema = z.union([aiTextSpecSchema, aiShapeSpecSchema, aiChartSpecSchema]);
+export const aiTableSpecSchema = z.strictObject({
+  type: z.literal("table"),
+  ...geometry,
+  rows: z.array(z.array(z.string())),
+  headerRow: z.boolean().nullable(),
+  fontSize: z.number().nullable(),
+});
+
+export const aiElementSpecSchema = z.union([aiTextSpecSchema, aiShapeSpecSchema, aiChartSpecSchema, aiTableSpecSchema]);
 
 export const aiElementChangesSchema = z.strictObject({
   x: z.number().nullable(),
@@ -73,6 +84,13 @@ export const aiElementChangesSchema = z.strictObject({
   categories: z.array(z.string()).nullable(),
   series: z.array(chartSeries).nullable(),
   showLegend: z.boolean().nullable(),
+  stacked: z.boolean().nullable(),
+  showValues: z.boolean().nullable(),
+  dualAxis: z.boolean().nullable(),
+  rows: z.array(z.array(z.string())).nullable(),
+  headerRow: z.boolean().nullable(),
+  headerFill: z.string().nullable(),
+  borderColor: z.string().nullable(),
   alt: z.string().nullable(),
 });
 
@@ -82,11 +100,13 @@ export const aiOperationSchema = z.union([
     op: z.literal("add_slide"),
     position: z.number().int().nullable(),
     background: z.string().nullable(),
+    notes: z.string().nullable(),
     elements: z.array(aiElementSpecSchema),
   }),
   z.strictObject({ op: z.literal("delete_slide"), slideId: z.string() }),
   z.strictObject({ op: z.literal("move_slide"), slideId: z.string(), position: z.number().int() }),
   z.strictObject({ op: z.literal("set_slide_background"), slideId: z.string(), background: z.string() }),
+  z.strictObject({ op: z.literal("set_slide_notes"), slideId: z.string(), notes: z.string() }),
   z.strictObject({ op: z.literal("add_element"), slideId: z.string(), element: aiElementSpecSchema }),
   z.strictObject({ op: z.literal("update_element"), elementId: z.string(), changes: aiElementChangesSchema }),
   z.strictObject({ op: z.literal("delete_element"), elementId: z.string() }),

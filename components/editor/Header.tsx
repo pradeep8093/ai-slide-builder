@@ -1,20 +1,29 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, Download, FileText, LayoutTemplate, Play, Presentation, Redo2, Undo2 } from "lucide-react";
+import { ChevronDown, Copy, Download, FileCode2, FileText, LayoutGrid, LayoutTemplate, MoreHorizontal, Play, Plus, Presentation, Redo2, Trash2, Undo2 } from "lucide-react";
 import { MAX_TITLE_LENGTH } from "@/lib/constants";
+import { downloadBlob, exportHtml } from "@/lib/export/html";
 import { exportPdf } from "@/lib/export/pdf";
 import { exportPptx } from "@/lib/export/pptx";
 import { shortcutLabel } from "@/lib/platform";
 import { useEditorStore, type SaveStatus } from "@/lib/store/editorStore";
 import { toast } from "@/lib/store/toastStore";
 import MenuButton from "../ui/MenuButton";
-import { captureSlideImage } from "../export/captureSlide";
+import { captureSlideImage, captureSlideMarkup } from "../export/captureSlide";
 
 interface HeaderProps {
   onOpenTemplates: () => void;
   onPresent: () => void;
+  /** Back to the list of presentations. */
+  onHome: () => void;
+  onNewDeck: () => void;
+  onDuplicateDeck: () => void;
+  onDeleteDeck: () => void;
 }
+
+type ExportKind = "pdf" | "pptx" | "html";
+const EXPORT_LABELS: Record<ExportKind, string> = { pdf: "Exporting PDF…", pptx: "Exporting PowerPoint…", html: "Exporting web page…" };
 
 const SAVE_LABELS: Record<SaveStatus, string> = {
   idle: "",
@@ -29,7 +38,7 @@ const buttonClass =
 const iconButtonClass =
   "inline-flex h-8 w-8 items-center justify-center rounded-md text-neutral-700 hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent";
 
-export default function Header({ onOpenTemplates, onPresent }: HeaderProps) {
+export default function Header({ onOpenTemplates, onPresent, onHome, onNewDeck, onDuplicateDeck, onDeleteDeck }: HeaderProps) {
   const title = useEditorStore((s) => s.deck.title);
   const slideCount = useEditorStore((s) => s.deck.slides.length);
   const canUndo = useEditorStore((s) => s.past.length > 0 || (s.gestureBase !== null && s.gestureBase !== s.deck));
@@ -38,10 +47,10 @@ export default function Header({ onOpenTemplates, onPresent }: HeaderProps) {
   const { setTitle, undo, redo } = useEditorStore.getState();
   const [exporting, setExporting] = useState<string | null>(null);
 
-  const runExport = async (kind: "pdf" | "pptx") => {
+  const runExport = async (kind: ExportKind) => {
     const deck = useEditorStore.getState().deck;
     if (deck.slides.length === 0 || exporting) return;
-    setExporting(kind === "pdf" ? "Exporting PDF…" : "Exporting PowerPoint…");
+    setExporting(EXPORT_LABELS[kind]);
     try {
       const fileName =
         kind === "pdf"
@@ -49,7 +58,9 @@ export default function Header({ onOpenTemplates, onPresent }: HeaderProps) {
               captureSlide: captureSlideImage,
               onProgress: (done, total) => setExporting(`Exporting PDF ${Math.min(done + 1, total)}/${total}…`),
             })
-          : await exportPptx(deck);
+          : kind === "pptx"
+            ? await exportPptx(deck)
+            : await exportHtml(deck, { renderSlide: captureSlideMarkup, download: downloadBlob });
       toast.success(`Exported ${fileName}`);
     } catch (error) {
       console.error(error);
@@ -60,10 +71,16 @@ export default function Header({ onOpenTemplates, onPresent }: HeaderProps) {
   };
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-neutral-200 bg-white px-4">
-      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white" aria-hidden>
-        <Presentation size={18} />
-      </div>
+    <header className="flex h-14 shrink-0 items-center gap-2 border-b border-neutral-200 bg-white px-4">
+      <button
+        type="button"
+        onClick={onHome}
+        aria-label="All presentations"
+        title="All presentations"
+        className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
+      >
+        <LayoutGrid size={17} aria-hidden />
+      </button>
       <input
         type="text"
         aria-label="Presentation title"
@@ -88,6 +105,17 @@ export default function Header({ onOpenTemplates, onPresent }: HeaderProps) {
       >
         {SAVE_LABELS[saveStatus]}
       </span>
+      <MenuButton
+        label="Presentation actions"
+        className={iconButtonClass}
+        items={[
+          { id: "new", label: "New presentation", icon: <Plus size={15} />, onSelect: onNewDeck },
+          { id: "duplicate", label: "Duplicate presentation", icon: <Copy size={15} />, onSelect: onDuplicateDeck },
+          { id: "delete", label: "Delete presentation", icon: <Trash2 size={15} />, danger: true, onSelect: onDeleteDeck },
+        ]}
+      >
+        <MoreHorizontal size={18} aria-hidden />
+      </MenuButton>
 
       <div className="ml-auto flex items-center gap-1">
         <button type="button" className={iconButtonClass} onClick={undo} disabled={!canUndo} aria-label="Undo" title={`Undo (${shortcutLabel("Z")})`}>
@@ -117,6 +145,7 @@ export default function Header({ onOpenTemplates, onPresent }: HeaderProps) {
           items={[
             { id: "pdf", label: "PDF document (.pdf)", icon: <FileText size={15} />, onSelect: () => void runExport("pdf") },
             { id: "pptx", label: "PowerPoint (.pptx)", icon: <Presentation size={15} />, onSelect: () => void runExport("pptx") },
+            { id: "html", label: "Web page (.html)", icon: <FileCode2 size={15} />, onSelect: () => void runExport("html") },
           ]}
         >
           <Download size={16} aria-hidden />

@@ -15,4 +15,8 @@ describe("exportFileName", () => {
   it("limits the length", () => {
     expect(exportFileName("a".repeat(300), "pdf")).toBe(`${"a".repeat(80)}.pdf`);
   });
+  it("supports the html extension with the same clean-up and fallback", () => {
+    expect(exportFileName("Board: Q3 <final>", "html")).toBe("Board Q3 final.html");
+    expect(exportFileName("", "html")).toBe(`${UNTITLED}.html`);
+  });
 });

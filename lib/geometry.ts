@@ -79,3 +79,60 @@ export function resizeRect(start: Rect, handle: ResizeHandle, dx: number, dy: nu
 export function moveRect(start: Rect, dx: number, dy: number): Rect {
   return clampRect({ ...start, x: start.x + dx, y: start.y + dy });
 }
+
+/** Smallest rect containing every given rect. Null for an empty list. */
+export function boundingRect(rects: Rect[]): Rect | null {
+  if (rects.length === 0) return null;
+  const left = Math.min(...rects.map((r) => r.x));
+  const top = Math.min(...rects.map((r) => r.y));
+  const right = Math.max(...rects.map((r) => r.x + r.width));
+  const bottom = Math.max(...rects.map((r) => r.y + r.height));
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+/** Rect spanned by two corner points, in any order. */
+export function rectFromPoints(x1: number, y1: number, x2: number, y2: number): Rect {
+  return { x: Math.min(x1, x2), y: Math.min(y1, y2), width: Math.abs(x2 - x1), height: Math.abs(y2 - y1) };
+}
+
+/** True when `inner` lies completely inside `outer` (edges may touch). */
+export function containsRect(outer: Rect, inner: Rect): boolean {
+  return inner.x >= outer.x && inner.y >= outer.y && inner.x + inner.width <= outer.x + outer.width && inner.y + inner.height <= outer.y + outer.height;
+}
+
+/**
+ * Maps a rect that lived inside `from` to the matching place inside `to`
+ * (used to resize several elements together by their shared bounding box).
+ */
+export function mapRect(rect: Rect, from: Rect, to: Rect): Rect {
+  const sx = from.width > 0 ? to.width / from.width : 1;
+  const sy = from.height > 0 ? to.height / from.height : 1;
+  return {
+    x: to.x + (rect.x - from.x) * sx,
+    y: to.y + (rect.y - from.y) * sy,
+    width: rect.width * sx,
+    height: rect.height * sy,
+  };
+}
+
+/**
+ * Limits a move of several rects together so every one stays reachable on the slide
+ * (the same rule as clampRect), without changing the spacing between them.
+ */
+export function clampGroupDelta(rects: Rect[], dx: number, dy: number): { dx: number; dy: number } {
+  let minDx = -Infinity;
+  let maxDx = Infinity;
+  let minDy = -Infinity;
+  let maxDy = Infinity;
+  for (const r of rects) {
+    const visibleX = Math.min(MIN_VISIBLE_PX, r.width);
+    const visibleY = Math.min(MIN_VISIBLE_PX, r.height);
+    minDx = Math.max(minDx, visibleX - r.width - r.x);
+    maxDx = Math.min(maxDx, SLIDE_WIDTH - visibleX - r.x);
+    minDy = Math.max(minDy, visibleY - r.height - r.y);
+    maxDy = Math.min(maxDy, SLIDE_HEIGHT - visibleY - r.y);
+  }
+  // An element that already sits outside the allowed area must not pin the others in place.
+  const safe = (value: number, lo: number, hi: number) => (lo > hi ? value : clamp(value, lo, hi));
+  return { dx: Math.round(safe(dx, minDx, maxDx)), dy: Math.round(safe(dy, minDy, maxDy)) };
+}

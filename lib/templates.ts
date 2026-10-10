@@ -30,7 +30,7 @@ function chart(kind: ChartKind, box: Box, data: Pick<ChartElement, "title" | "ca
 }
 
 function slide(background: string, elements: SlideElement[]): Slide {
-  return { id: createId(), background, elements };
+  return { id: createId(), background, elements, notes: "" };
 }
 
 function pitchDeck(): Template {

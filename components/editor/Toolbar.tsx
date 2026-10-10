@@ -11,18 +11,28 @@ import {
   Bold,
   BringToFront,
   ChevronDown,
+  ClipboardPaste,
   Copy,
+  CopyPlus,
+  Crop,
+  Group,
   ImageIcon,
   Italic,
   Layers,
+  Lock,
   Minus,
+  MoreHorizontal,
   Plus,
+  Scissors,
   SendToBack,
   Shapes,
+  Sheet,
   Table2,
   Trash2,
   Type,
   Underline,
+  Ungroup,
+  Unlock,
 } from "lucide-react";
 import {
   CHART_KINDS,
@@ -37,14 +47,16 @@ import {
   type FontFamily,
   type TextAlign,
 } from "@/lib/constants";
-import { createChartElement, createImageElement, createShapeElement, createTextElement } from "@/lib/factory";
+import { createChartElement, createImageElement, createShapeElement, createTableElement, createTextElement } from "@/lib/factory";
 import { clamp } from "@/lib/geometry";
 import { importImageFile } from "@/lib/image";
-import { legendVisible } from "@/lib/chart";
+import { isRadial, legendVisible } from "@/lib/chart";
 import { DEFAULT_LINE_COLOR } from "@/lib/sanitize";
-import type { ChartElement, ElementPatch, ImageElement, ShapeElement, SlideElement, TextElement } from "@/lib/schema";
-import { selectCurrentElement, selectCurrentSlide, useEditorStore } from "@/lib/store/editorStore";
+import type { ChartElement, ElementPatch, ImageElement, ShapeElement, SlideElement, TableElement, TextElement } from "@/lib/schema";
+import { selectCurrentElement, selectCurrentSlide, selectSelectedElements, useEditorStore } from "@/lib/store/editorStore";
 import { toast } from "@/lib/store/toastStore";
+import { useShallow } from "zustand/react/shallow";
+import { copySelection, cutSelection, pasteFromApp, writeSystemText } from "../hooks/useClipboard";
 import ColorInput from "../ui/ColorInput";
 import MenuButton from "../ui/MenuButton";
 
@@ -103,7 +115,7 @@ function DraftInput({
   );
 }
 
-function FontSizeControl({ element, update }: { element: TextElement; update: (patch: ElementPatch, key?: string) => void }) {
+function FontSizeControl({ element, update }: { element: { fontSize: number }; update: (patch: ElementPatch, key?: string) => void }) {
   const set = (size: number) => update({ fontSize: clamp(Math.round(size), FONT_SIZE_MIN, FONT_SIZE_MAX) }, "fontSize");
   return (
     <div className="flex shrink-0 items-center rounded-md border border-neutral-200">
@@ -128,6 +140,18 @@ function FontSizeControl({ element, update }: { element: TextElement; update: (p
   );
 }
 
+function FontSelect({ value, update }: { value: FontFamily; update: (patch: ElementPatch) => void }) {
+  return (
+    <select aria-label="Font" className={`${selectClass} w-36`} value={value} onChange={(e) => update({ fontFamily: e.target.value as FontFamily })}>
+      {FONT_FAMILIES.map((font) => (
+        <option key={font} value={font} style={{ fontFamily: font }}>
+          {font}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function TextControls({ element, update }: { element: TextElement; update: (patch: ElementPatch, key?: string) => void }) {
   const aligns: { value: TextAlign; label: string; Icon: typeof AlignLeft }[] = [
     { value: "left", label: "Align left", Icon: AlignLeft },
@@ -136,13 +160,7 @@ function TextControls({ element, update }: { element: TextElement; update: (patc
   ];
   return (
     <>
-      <select aria-label="Font" className={`${selectClass} w-36`} value={element.fontFamily} onChange={(e) => update({ fontFamily: e.target.value as FontFamily })}>
-        {FONT_FAMILIES.map((font) => (
-          <option key={font} value={font} style={{ fontFamily: font }}>
-            {font}
-          </option>
-        ))}
-      </select>
+      <FontSelect value={element.fontFamily} update={update} />
       <FontSizeControl element={element} update={update} />
       <button type="button" className={iconButton} aria-label="Bold" aria-pressed={element.bold} onClick={() => update({ bold: !element.bold })}>
         <Bold size={16} aria-hidden />
@@ -221,13 +239,14 @@ function ShapeControls({ element, update }: { element: ShapeElement; update: (pa
   );
 }
 
-function ImageControls({ element, update }: { element: ImageElement; update: (patch: ElementPatch, key?: string) => void }) {
+function ImageControls({ element, update, onCrop }: { element: ImageElement; update: (patch: ElementPatch, key?: string) => void; onCrop: () => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const lockedTitle = element.locked ? "Unlock the image first" : undefined;
   return (
     <>
-      <button type="button" className={toolButton} onClick={() => inputRef.current?.click()}>
+      <button type="button" className={toolButton} disabled={element.locked} title={lockedTitle} onClick={() => inputRef.current?.click()}>
         <ImageIcon size={16} aria-hidden />
-        Replace image
+        Replace
       </button>
       <input
         ref={inputRef}
@@ -241,13 +260,17 @@ function ImageControls({ element, update }: { element: ImageElement; update: (pa
           if (!file) return;
           try {
             const image = await importImageFile(file);
-            // Keep the current width; the height follows the new image's aspect ratio.
-            update({ src: image.src, width: element.width, height: (element.width * image.height) / image.width });
+            // Keep the current width; the height follows the new image's aspect ratio. Any crop is dropped.
+            update({ src: image.src, crop: null, width: element.width, height: (element.width * image.height) / image.width });
           } catch (error) {
             toast.error(error instanceof Error ? error.message : "The image couldn't be added.");
           }
         }}
       />
+      <button type="button" className={toolButton} disabled={element.locked} title={lockedTitle ?? "Crop the image"} onClick={onCrop}>
+        <Crop size={16} aria-hidden />
+        Crop
+      </button>
       <DraftInput
         aria-label="Alt text"
         placeholder="Alt text (describes the image)"
@@ -260,8 +283,14 @@ function ImageControls({ element, update }: { element: ImageElement; update: (pa
   );
 }
 
+const toggleButton = `${toolButton} aria-pressed:bg-indigo-50 aria-pressed:text-indigo-700`;
+
 function ChartControls({ element, update, onEditData }: { element: ChartElement; update: (patch: ElementPatch, key?: string) => void; onEditData: () => void }) {
-  const legendUseful = element.chartType === "pie" || element.series.length > 1;
+  const radial = isRadial(element.chartType);
+  const multi = element.series.length > 1;
+  const legendUseful = radial || multi;
+  const stackable = element.chartType === "bar";
+  const dualCapable = element.chartType === "bar" || element.chartType === "line";
   return (
     <>
       <select aria-label="Chart type" className={selectClass} value={element.chartType} onChange={(e) => update({ chartType: e.target.value as ChartKind })}>
@@ -275,9 +304,10 @@ function ChartControls({ element, update, onEditData }: { element: ChartElement;
         <Table2 size={16} aria-hidden />
         Edit data
       </button>
+      <Divider />
       <button
         type="button"
-        className={`${toolButton} aria-pressed:bg-indigo-50 aria-pressed:text-indigo-700`}
+        className={toggleButton}
         aria-pressed={legendVisible(element)}
         disabled={!legendUseful}
         title={legendUseful ? "Show or hide the legend" : "A legend appears when the chart has two or more series"}
@@ -285,22 +315,87 @@ function ChartControls({ element, update, onEditData }: { element: ChartElement;
       >
         Legend
       </button>
+      <button type="button" className={toggleButton} aria-pressed={Boolean(element.showValues)} title="Show each value on the chart" onClick={() => update({ showValues: !element.showValues })}>
+        Data labels
+      </button>
+      {stackable && (
+        <button
+          type="button"
+          className={toggleButton}
+          aria-pressed={Boolean(element.stacked) && multi}
+          disabled={!multi}
+          title={multi ? "Stack the series on top of each other" : "Stacking needs two or more series"}
+          onClick={() => update({ stacked: !element.stacked })}
+        >
+          Stacked
+        </button>
+      )}
+      {dualCapable && (
+        <button
+          type="button"
+          className={toggleButton}
+          aria-pressed={Boolean(element.dualAxis) && multi}
+          disabled={!multi}
+          title={multi ? "Plot the last series as a line against a second axis on the right" : "A second axis needs two or more series"}
+          onClick={() => update({ dualAxis: !element.dualAxis })}
+        >
+          Dual axis
+        </button>
+      )}
+    </>
+  );
+}
+
+function TableControls({ element, update, onEdit }: { element: TableElement; update: (patch: ElementPatch, key?: string) => void; onEdit: () => void }) {
+  return (
+    <>
+      <button type="button" className={toolButton} onClick={onEdit}>
+        <Table2 size={16} aria-hidden />
+        Edit table
+      </button>
+      <button type="button" className={toggleButton} aria-pressed={element.headerRow} title="Style the first row as a header" onClick={() => update({ headerRow: !element.headerRow })}>
+        Header row
+      </button>
+      <Divider />
+      <FontSelect value={element.fontFamily} update={update} />
+      <FontSizeControl element={element} update={update} />
+      <ColorInput label="Text color" value={element.color} onChange={(color) => update({ color }, "color")} />
+      <Divider />
+      <ColorInput label="Header fill" value={element.headerFill} disabled={!element.headerRow} onChange={(headerFill) => update({ headerFill }, "headerFill")} />
+      <ColorInput label="Border color" value={element.borderColor} onChange={(borderColor) => update({ borderColor }, "borderColor")} />
+      <button
+        type="button"
+        className={toggleButton}
+        aria-pressed={element.borderColor === null}
+        onClick={() => update({ borderColor: element.borderColor === null ? "#d1d5db" : null })}
+        title={element.borderColor === null ? "Add borders" : "Remove borders"}
+      >
+        No borders
+      </button>
     </>
   );
 }
 
 interface ToolbarProps {
-  onEditChartData: (elementId: string) => void;
+  /** Opens the dedicated editor for an element (chart data, table cells, image crop). */
+  onEditElement: (elementId: string) => void;
 }
 
-export default function Toolbar({ onEditChartData }: ToolbarProps) {
+export default function Toolbar({ onEditElement }: ToolbarProps) {
   const slide = useEditorStore(selectCurrentSlide);
   const element = useEditorStore(selectCurrentElement);
+  const selected = useEditorStore(useShallow(selectSelectedElements));
   const imageInputRef = useRef<HTMLInputElement>(null);
-  const { addElement, setEditing, updateElement, setSlideBackground, duplicateElement, deleteElement, reorderElement } = useEditorStore.getState();
+  const { addElement, setEditing, updateElement, setSlideBackground, duplicateElements, deleteElements, reorderElements, groupElements, ungroupElements, setElementsLocked } =
+    useEditorStore.getState();
   const disabledTitle = slide ? undefined : "Add a slide first";
-  // With an element selected the formatting controls need the room, so insert tools show icons only.
-  const labelClass = element ? "sr-only" : undefined;
+  // With elements selected the formatting controls need the room, so insert tools show icons only.
+  const labelClass = selected.length > 0 ? "sr-only" : undefined;
+  const ids = selected.map((e) => e.id);
+  const allLocked = selected.length > 0 && selected.every((e) => e.locked);
+  const groupIds = new Set(selected.map((e) => e.groupId ?? `solo:${e.id}`));
+  const canGroup = selected.length > 1 && groupIds.size > 1;
+  const canUngroup = selected.some((e) => e.groupId);
 
   const insert = (newElement: SlideElement) => {
     if (!slide) return;
@@ -311,6 +406,11 @@ export default function Toolbar({ onEditChartData }: ToolbarProps) {
   const update = (patch: ElementPatch, key?: string) => {
     if (!slide || !element) return;
     updateElement(slide.id, element.id, patch, key ? { coalesceKey: `${key}:${element.id}` } : undefined);
+  };
+
+  const copy = (cut: boolean) => {
+    const entry = cut ? cutSelection() : copySelection();
+    if (entry) writeSystemText(entry.plainText);
   };
 
   return (
@@ -341,6 +441,10 @@ export default function Toolbar({ onEditChartData }: ToolbarProps) {
           }
         }}
       />
+      <button type="button" className={toolButton} disabled={!slide} title={disabledTitle ?? "Insert table"} onClick={() => insert(createTableElement())}>
+        <Sheet size={16} aria-hidden />
+        <span className={labelClass}>Table</span>
+      </button>
       <MenuButton
         label="Insert chart"
         title={disabledTitle ?? "Insert chart"}
@@ -366,7 +470,7 @@ export default function Toolbar({ onEditChartData }: ToolbarProps) {
 
       {slide && <Divider />}
 
-      {slide && !element && (
+      {slide && selected.length === 0 && (
         <div className="flex items-center gap-2 text-sm text-neutral-600">
           <span>Background</span>
           <ColorInput label="Slide background" value={slide.background} onChange={(color) => setSlideBackground(slide.id, color)} />
@@ -377,31 +481,86 @@ export default function Toolbar({ onEditChartData }: ToolbarProps) {
         <div className="flex flex-wrap items-center gap-1" data-testid={`format-${element.type}`}>
           {element.type === "text" && <TextControls element={element} update={update} />}
           {element.type === "shape" && <ShapeControls element={element} update={update} />}
-          {element.type === "image" && <ImageControls element={element} update={update} />}
-          {element.type === "chart" && <ChartControls element={element} update={update} onEditData={() => onEditChartData(element.id)} />}
+          {element.type === "image" && <ImageControls element={element} update={update} onCrop={() => onEditElement(element.id)} />}
+          {element.type === "chart" && <ChartControls element={element} update={update} onEditData={() => onEditElement(element.id)} />}
+          {element.type === "table" && <TableControls element={element} update={update} onEdit={() => onEditElement(element.id)} />}
         </div>
       )}
 
-      {slide && element && (
+      {slide && selected.length > 1 && (
+        <span className="px-1 text-sm text-neutral-600" data-testid="multi-selection">
+          {selected.length} elements selected
+        </span>
+      )}
+
+      {slide && selected.length > 0 && (
         <div className="ml-auto flex items-center gap-1 pl-2">
+          <button
+            type="button"
+            className={iconButton}
+            aria-pressed={allLocked}
+            aria-label={allLocked ? "Unlock" : "Lock"}
+            title={allLocked ? "Unlock: allow moving, resizing and AI edits again" : "Lock: prevent moving, resizing, deleting and AI edits"}
+            onClick={() => setElementsLocked(slide.id, ids, !allLocked)}
+          >
+            {allLocked ? <Lock size={16} aria-hidden /> : <Unlock size={16} aria-hidden />}
+          </button>
+          {canGroup && (
+            <button type="button" className={iconButton} aria-label="Group" title="Group" onClick={() => groupElements(slide.id, ids)}>
+              <Group size={16} aria-hidden />
+            </button>
+          )}
+          {canUngroup && (
+            <button type="button" className={iconButton} aria-label="Ungroup" title="Ungroup" onClick={() => ungroupElements(slide.id, ids)}>
+              <Ungroup size={16} aria-hidden />
+            </button>
+          )}
           <MenuButton
             label="Arrange"
             align="end"
             className={iconButton}
             items={[
-              { id: "front", label: "Bring to front", icon: <ArrowUpToLine size={14} />, onSelect: () => reorderElement(slide.id, element.id, "front") },
-              { id: "forward", label: "Bring forward", icon: <BringToFront size={14} />, onSelect: () => reorderElement(slide.id, element.id, "forward") },
-              { id: "backward", label: "Send backward", icon: <SendToBack size={14} />, onSelect: () => reorderElement(slide.id, element.id, "backward") },
-              { id: "back", label: "Send to back", icon: <ArrowDownToLine size={14} />, onSelect: () => reorderElement(slide.id, element.id, "back") },
+              { id: "front", label: "Bring to front", icon: <ArrowUpToLine size={14} />, onSelect: () => reorderElements(slide.id, ids, "front") },
+              { id: "forward", label: "Bring forward", icon: <BringToFront size={14} />, onSelect: () => reorderElements(slide.id, ids, "forward") },
+              { id: "backward", label: "Send backward", icon: <SendToBack size={14} />, onSelect: () => reorderElements(slide.id, ids, "backward") },
+              { id: "back", label: "Send to back", icon: <ArrowDownToLine size={14} />, onSelect: () => reorderElements(slide.id, ids, "back") },
             ]}
           >
             <Layers size={16} aria-hidden />
           </MenuButton>
-          <button type="button" className={iconButton} aria-label="Duplicate element" title="Duplicate" onClick={() => duplicateElement(slide.id, element.id)}>
-            <Copy size={16} aria-hidden />
+          <button type="button" className={iconButton} aria-label="Duplicate" title="Duplicate" onClick={() => duplicateElements(slide.id, ids)}>
+            <CopyPlus size={16} aria-hidden />
           </button>
-          <button type="button" className={`${iconButton} hover:text-red-600`} aria-label="Delete element" title="Delete" onClick={() => deleteElement(slide.id, element.id)}>
+          <button
+            type="button"
+            className={`${iconButton} hover:text-red-600`}
+            aria-label="Delete"
+            title={allLocked ? "Locked elements can't be deleted" : "Delete"}
+            disabled={allLocked}
+            onClick={() => deleteElements(slide.id, ids)}
+          >
             <Trash2 size={16} aria-hidden />
+          </button>
+          <MenuButton
+            label="More actions"
+            align="end"
+            className={iconButton}
+            items={[
+              { id: "copy", label: "Copy", icon: <Copy size={14} />, onSelect: () => copy(false) },
+              { id: "cut", label: "Cut", icon: <Scissors size={14} />, onSelect: () => copy(true) },
+              { id: "paste", label: "Paste", icon: <ClipboardPaste size={14} />, onSelect: () => pasteFromApp() },
+            ]}
+          >
+            <MoreHorizontal size={16} aria-hidden />
+          </MenuButton>
+        </div>
+      )}
+
+      {slide && selected.length === 0 && (
+        <div className="ml-auto flex items-center pl-2">
+          <button type="button" className={toolButton} title="Paste copied elements or slides" onClick={() => pasteFromApp()}>
+            <ClipboardPaste size={16} aria-hidden />
+            Paste
           </button>
         </div>
       )}

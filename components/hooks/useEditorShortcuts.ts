@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { isTypingTarget } from "@/lib/platform";
-import { useEditorStore } from "@/lib/store/editorStore";
+import { selectSelectedElements, useEditorStore } from "@/lib/store/editorStore";
 
 const ARROWS: Record<string, [number, number]> = {
   ArrowUp: [0, -1],
@@ -11,15 +11,14 @@ const ARROWS: Record<string, [number, number]> = {
   ArrowRight: [1, 0],
 };
 
-/** True when the user has text selected somewhere on the page (then ⌘C/⌘V must stay native). */
-function hasTextSelection(): boolean {
-  const selection = typeof window.getSelection === "function" ? window.getSelection() : null;
-  return Boolean(selection && !selection.isCollapsed && selection.toString().length > 0);
-}
+/** Arrow keys move the selection by this many slide pixels; with Shift by the larger step. */
+export const NUDGE_STEP = 1;
+export const NUDGE_STEP_LARGE = 10;
 
 /**
- * Editor keyboard shortcuts: undo/redo, delete, duplicate, copy/paste, nudge with arrows,
- * Enter to edit text and Escape to deselect. Ignored while typing in any field.
+ * Editor keyboard shortcuts: undo/redo, select all, group/ungroup, delete, duplicate, nudge with
+ * arrows, Enter to edit text and Escape to deselect. Ignored while typing in any field.
+ * (Copy, cut and paste live in useClipboard.)
  */
 export function useEditorShortcuts(enabled: boolean) {
   useEffect(() => {
@@ -44,28 +43,29 @@ export function useEditorShortcuts(enabled: boolean) {
 
       const slideId = state.selectedSlideId;
       if (!slideId) return;
-      if (mod && key === "v") {
-        if (state.clipboard && !hasTextSelection()) {
-          event.preventDefault();
-          state.pasteElement();
-        }
+      // Slide thumbnails have their own keys (arrows move between slides, Delete removes the slide).
+      const onThumb = event.target instanceof HTMLElement && event.target.closest("[data-slide-thumb]");
+      if (onThumb) return;
+
+      if (mod && key === "a") {
+        event.preventDefault();
+        state.selectAllElements();
         return;
       }
 
-      const elementId = state.selectedElementId;
-      const element = state.deck.slides.find((s) => s.id === slideId)?.elements.find((e) => e.id === elementId);
-      if (!elementId || !element) return;
+      const elements = selectSelectedElements(state);
+      if (elements.length === 0) return;
+      const ids = elements.map((e) => e.id);
 
-      if (mod && key === "c") {
-        if (!hasTextSelection()) {
-          event.preventDefault();
-          state.copyElement(slideId, elementId);
-        }
+      if (mod && key === "g") {
+        event.preventDefault();
+        if (event.shiftKey) state.ungroupElements(slideId, ids);
+        else state.groupElements(slideId, ids);
         return;
       }
       if (mod && key === "d") {
         event.preventDefault();
-        state.duplicateElement(slideId, elementId);
+        state.duplicateElements(slideId, ids);
         return;
       }
       if (mod || event.altKey) return;
@@ -73,17 +73,17 @@ export function useEditorShortcuts(enabled: boolean) {
       const onButton = event.target instanceof HTMLElement && event.target.closest("button, a, [role='menuitem']");
       if (event.key === "Delete" || event.key === "Backspace") {
         event.preventDefault();
-        state.deleteElement(slideId, elementId);
+        state.deleteElements(slideId, ids);
       } else if (event.key === "Escape") {
         state.selectElement(null);
-      } else if (event.key === "Enter" && !onButton && element.type === "text") {
+      } else if (event.key === "Enter" && !onButton && elements.length === 1 && elements[0].type === "text") {
         event.preventDefault();
-        state.setEditing(element.id);
+        state.setEditing(elements[0].id);
       } else if (ARROWS[event.key]) {
         event.preventDefault();
         const [dx, dy] = ARROWS[event.key];
-        const step = event.shiftKey ? 10 : 1;
-        state.updateElement(slideId, elementId, { x: element.x + dx * step, y: element.y + dy * step }, { coalesceKey: `nudge:${elementId}` });
+        const step = event.shiftKey ? NUDGE_STEP_LARGE : NUDGE_STEP;
+        state.nudgeElements(slideId, ids, dx * step, dy * step);
       }
     };
     window.addEventListener("keydown", onKeyDown);

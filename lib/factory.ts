@@ -16,6 +16,7 @@ import type {
   ShapeElement,
   Slide,
   SlideElement,
+  TableElement,
   TextElement,
 } from "./schema";
 
@@ -23,8 +24,8 @@ export function createDeck(title = ""): Deck {
   return { version: 1, id: createId(), title, slides: [], updatedAt: Date.now() };
 }
 
-export function createSlide(background: string = DEFAULT_SLIDE_BACKGROUND): Slide {
-  return { id: createId(), background, elements: [] };
+export function createSlide(background: string = DEFAULT_SLIDE_BACKGROUND, notes = ""): Slide {
+  return { id: createId(), background, elements: [], notes };
 }
 
 function centered(width: number, height: number) {
@@ -69,15 +70,37 @@ export function createShapeElement(shape: ShapeKind, overrides: Partial<Omit<Sha
 }
 
 export function createChartElement(chartType: ChartKind, overrides: Partial<Omit<ChartElement, "type">> = {}): ChartElement {
+  const scatter = chartType === "scatter";
   return {
     id: createId(),
     type: "chart",
     chartType,
     ...centered(720, 420),
     title: "",
-    categories: ["Q1", "Q2", "Q3", "Q4"],
+    // Scatter charts need numeric X values in the first column.
+    categories: scatter ? ["1", "2", "3", "4"] : ["Q1", "Q2", "Q3", "Q4"],
     series: [{ name: "Series 1", values: [12, 19, 15, 23] }],
     showLegend: true,
+    ...overrides,
+  };
+}
+
+export function createTableElement(overrides: Partial<Omit<TableElement, "type">> = {}): TableElement {
+  return {
+    id: createId(),
+    type: "table",
+    ...centered(720, 192),
+    rows: [
+      ["Header 1", "Header 2", "Header 3"],
+      ["", "", ""],
+      ["", "", ""],
+    ],
+    headerRow: true,
+    fontSize: 20,
+    fontFamily: DEFAULT_FONT,
+    color: DEFAULT_TEXT_COLOR,
+    headerFill: "#eef2ff",
+    borderColor: "#d1d5db",
     ...overrides,
   };
 }
@@ -88,18 +111,44 @@ export function createImageElement(src: string, naturalWidth: number, naturalHei
   return { id: createId(), type: "image", ...centered(size.width, size.height), src, alt };
 }
 
-/** Copies an element with a fresh id. */
-export function cloneElement<T extends SlideElement>(element: T): T {
-  return { ...structuredClone(element), id: createId() };
+/**
+ * Copies elements with fresh ids. Copies are unlocked; groups inside the copied set become new groups,
+ * and a lone member of a group is copied without a group.
+ */
+export function cloneElements<T extends SlideElement>(elements: T[]): T[] {
+  const counts = new Map<string, number>();
+  for (const el of elements) if (el.groupId) counts.set(el.groupId, (counts.get(el.groupId) ?? 0) + 1);
+  const newGroupIds = new Map<string, string>();
+  return elements.map((element) => {
+    const copy = { ...structuredClone(element), id: createId() } as T;
+    delete copy.locked;
+    delete copy.groupId;
+    if (element.groupId && (counts.get(element.groupId) ?? 0) > 1) {
+      if (!newGroupIds.has(element.groupId)) newGroupIds.set(element.groupId, createId());
+      copy.groupId = newGroupIds.get(element.groupId);
+    }
+    return copy;
+  });
 }
 
-/** Copies a slide and all its elements with fresh ids. */
+/** Copies one element with a fresh id (unlocked, not grouped). */
+export function cloneElement<T extends SlideElement>(element: T): T {
+  return cloneElements([element])[0];
+}
+
+/** Copies a slide and all its elements (and their groups) with fresh ids, keeping notes. */
 export function cloneSlide(slide: Slide): Slide {
-  return { id: createId(), background: slide.background, elements: slide.elements.map((el) => cloneElement(el)) };
+  return { id: createId(), background: slide.background, notes: slide.notes ?? "", elements: cloneElementsKeepingLocks(slide.elements) };
+}
+
+/** Like cloneElements, but a duplicated slide keeps its locks so it is an exact copy. */
+function cloneElementsKeepingLocks(elements: SlideElement[]): SlideElement[] {
+  const copies = cloneElements(elements);
+  return copies.map((copy, i) => (elements[i].locked ? { ...copy, locked: true } : copy));
 }
 
 /**
- * Offsets a new element diagonally while another element already sits at the same spot,
+ * Offsets new elements diagonally while another element already sits at the same spot,
  * so repeated inserts/pastes don't stack invisibly on top of each other.
  */
 export function cascadePosition<T extends SlideElement>(element: T, existing: SlideElement[]): T {
@@ -112,4 +161,13 @@ export function cascadePosition<T extends SlideElement>(element: T, existing: Sl
     if (x + 24 > SLIDE_WIDTH || y + 24 > SLIDE_HEIGHT) break;
   }
   return { ...element, x, y };
+}
+
+/** Offsets a set of elements together (keeping their arrangement) until the first one lands on a free spot. */
+export function cascadeGroup<T extends SlideElement>(elements: T[], existing: SlideElement[]): T[] {
+  if (elements.length === 0) return elements;
+  const anchor = cascadePosition(elements[0], existing);
+  const dx = anchor.x - elements[0].x;
+  const dy = anchor.y - elements[0].y;
+  return elements.map((el) => ({ ...el, x: el.x + dx, y: el.y + dy }));
 }

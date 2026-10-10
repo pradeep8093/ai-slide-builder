@@ -1,13 +1,11 @@
 import type { Deck } from "../schema";
 import type { AiRefs } from "./apply";
+import { buildConversationContext, type ConversationMessage } from "./context";
 import { aiErrorMessage, AiRequestError, type AiErrorBody } from "./errors";
 import { serializeDeckForAi } from "./prompt";
 import { aiResponseSchema, type AiOperation } from "./schema";
 
-export interface ChatTurn {
-  role: "user" | "assistant";
-  content: string;
-}
+export type { ChatTurn } from "./context";
 
 export interface AiEditResult {
   reply: string;
@@ -16,29 +14,22 @@ export interface AiEditResult {
 }
 
 export const AI_ENDPOINT = "/api/ai";
-export const HISTORY_TURNS = 12;
-export const MAX_TURN_CHARS = 4_000;
 
-/** Sends the conversation and a snapshot of the deck to the app's AI route. */
+/** Sends the (budgeted) conversation and an image-free snapshot of the deck to the app's AI route. */
 export async function requestAiEdit(
-  input: { history: ChatTurn[]; deck: Deck; selectedSlideId: string | null },
+  input: { conversation: ConversationMessage[]; deck: Deck; selectedSlideId: string | null },
   signal?: AbortSignal,
   fetchImpl: typeof fetch = fetch,
 ): Promise<AiEditResult> {
   const { context, refs } = serializeDeckForAi(input.deck, input.selectedSlideId);
-  const messages = input.history
-    .filter((turn) => turn.content.trim())
-    .slice(-HISTORY_TURNS)
-    .map((turn) => ({ role: turn.role, content: turn.content.slice(0, MAX_TURN_CHARS) }));
-  // The model only sees assistant replies after the first user message.
-  while (messages.length > 0 && messages[0].role === "assistant") messages.shift();
+  const { turns, digest } = buildConversationContext(input.conversation);
 
   let response: Response;
   try {
     response = await fetchImpl(AI_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages, deck: context }),
+      body: JSON.stringify({ messages: turns, digest, deck: context }),
       signal,
     });
   } catch (error) {
@@ -53,6 +44,8 @@ export async function requestAiEdit(
     body = await response.json();
   } catch {
     if (signal?.aborted) throw new AiRequestError("aborted", aiErrorMessage("aborted"));
+    // An error page that isn't JSON (e.g. a proxy's 504) is reported by its status.
+    if (!response.ok) throw new AiRequestError("upstream_error", aiErrorMessage("upstream_error", { status: response.status }));
     throw new AiRequestError("invalid_output", aiErrorMessage("invalid_output"));
   }
 

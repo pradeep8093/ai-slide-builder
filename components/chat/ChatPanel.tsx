@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowUp, Check, RotateCcw, Sparkles, Square, Trash2 } from "lucide-react";
+import { buildConversationContext } from "@/lib/ai/context";
 import { MAX_PROMPT_CHARS, useChatStore, type ChatMessage } from "@/lib/store/chatStore";
 import { useEditorStore } from "@/lib/store/editorStore";
 
@@ -16,6 +17,7 @@ export const DECK_SUGGESTIONS = [
   "Add a summary slide at the end",
   "Make all slide titles the same size and position",
   "Give this slide a dark background with light text",
+  "Write speaker notes for every slide",
 ];
 
 const MAX_VISIBLE_CHANGES = 6;
@@ -90,6 +92,7 @@ export default function ChatPanel() {
   const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const condensedCount = useMemo(() => buildConversationContext(messages).condensedCount, [messages]);
 
   useEffect(() => {
     const list = listRef.current;
@@ -135,7 +138,7 @@ export default function ChatPanel() {
         {messages.length === 0 && !pending && (
           <div className="pt-2">
             <p className="text-sm leading-6 text-neutral-500">
-              {hasSlides ? "Ask me to edit your slides. I can change text, layout, colors and charts." : "Describe the presentation you need and I'll draft the slides."}
+              {hasSlides ? "Ask me to edit your slides. I can change text, layout, colors, charts, tables and speaker notes." : "Describe the presentation you need and I'll draft the slides."}
             </p>
             <div className="mt-4 flex flex-col gap-2" aria-label="Suggestions">
               {suggestions.map((suggestion) => (
@@ -150,6 +153,11 @@ export default function ChatPanel() {
               ))}
             </div>
           </div>
+        )}
+        {condensedCount > 0 && (
+          <p className="rounded-md bg-neutral-50 px-3 py-2 text-xs leading-5 text-neutral-500" data-testid="chat-condensed">
+            To stay within the AI&apos;s limits, the {condensedCount} oldest message{condensedCount === 1 ? " is" : "s are"} sent as a short summary.
+          </p>
         )}
         {messages.map((message) => (
           <MessageBubble key={message.id} message={message} canRetry={message === last && !pending} onRetry={() => void retry()} />

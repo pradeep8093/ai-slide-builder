@@ -7,7 +7,8 @@ export const DEFAULT_BASE_URL = "https://api.groq.com/openai/v1";
 export const DEFAULT_MODEL = "openai/gpt-oss-120b";
 export const REQUEST_TIMEOUT_MS = 90_000;
 export const MAX_BODY_CHARS = 400_000;
-export const MAX_HISTORY = 12;
+/** Safety cap; the client already trims history to a token budget. */
+export const MAX_HISTORY = 24;
 export const MAX_MESSAGE_CHARS = 8_000;
 
 const elementViewSchema = z.looseObject({ id: z.string(), type: z.string() });
@@ -20,6 +21,7 @@ export const deckContextSchema = z.strictObject({
       id: z.string(),
       number: z.number().int(),
       background: z.string().optional(),
+      notes: z.string().optional(),
       elements: z.array(elementViewSchema).optional(),
       elementsOmitted: z.boolean().optional(),
       summary: z.string().optional(),
@@ -27,12 +29,16 @@ export const deckContextSchema = z.strictObject({
   ),
 });
 
+export const MAX_DIGEST_CHARS = 12_000;
+
 export const chatRequestSchema = z.strictObject({
   messages: z
     .array(z.strictObject({ role: z.enum(["user", "assistant"]), content: z.string().min(1).max(MAX_MESSAGE_CHARS) }))
     .min(1)
     .max(50)
     .refine((m) => m.length > 0 && m[m.length - 1].role === "user", "The last message must come from the user"),
+  /** Condensed summary of older messages (see lib/ai/context.ts). */
+  digest: z.string().max(MAX_DIGEST_CHARS).nullable().optional(),
   deck: deckContextSchema,
 });
 
@@ -120,7 +126,7 @@ export async function generateDeckEdit(
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.apiKey}` },
       body: JSON.stringify({
         model: config.model,
-        messages: [{ role: "system", content: buildSystemPrompt(request.deck as AiDeckContext) }, ...history],
+        messages: [{ role: "system", content: buildSystemPrompt(request.deck as AiDeckContext, request.digest) }, ...history],
         response_format: {
           type: "json_schema",
           json_schema: { name: "deck_edit", strict: true, schema: buildResponseJsonSchema() },

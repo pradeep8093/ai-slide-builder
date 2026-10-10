@@ -14,6 +14,7 @@ export const MAX_ELEMENTS_PER_SLIDE = 100;
 export const HISTORY_LIMIT = 100;
 
 export const MAX_TITLE_LENGTH = 120;
+export const MAX_NOTES_LENGTH = 5000;
 export const MAX_TEXT_LENGTH = 5000;
 export const MAX_ALT_LENGTH = 300;
 
@@ -53,7 +54,7 @@ export const SHAPE_LABELS: Record<ShapeKind, string> = {
   line: "Line",
 };
 
-export const CHART_KINDS = ["bar", "line", "area", "pie"] as const;
+export const CHART_KINDS = ["bar", "line", "area", "pie", "doughnut", "scatter"] as const;
 export type ChartKind = (typeof CHART_KINDS)[number];
 
 export const CHART_LABELS: Record<ChartKind, string> = {
@@ -61,7 +62,12 @@ export const CHART_LABELS: Record<ChartKind, string> = {
   line: "Line chart",
   area: "Area chart",
   pie: "Pie chart",
+  doughnut: "Doughnut chart",
+  scatter: "Scatter chart",
 };
+
+/** Chart types that draw one value per category from the first series only. */
+export const RADIAL_CHART_KINDS: readonly ChartKind[] = ["pie", "doughnut"];
 
 export const MAX_CHART_CATEGORIES = 24;
 export const MAX_CHART_SERIES = 8;
@@ -92,6 +98,10 @@ export const CHART_COLORS_DARK = [
   "#9085e9",
   "#e66767",
 ] as const;
+
+export const MAX_TABLE_ROWS = 30;
+export const MAX_TABLE_COLS = 10;
+export const MAX_TABLE_CELL_LENGTH = 500;
 
 export const MAX_IMAGE_FILE_BYTES = 10 * 1024 * 1024;
 export const MAX_IMAGE_DIMENSION = 1920;
